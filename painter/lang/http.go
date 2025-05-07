@@ -1,31 +1,61 @@
 package lang
 
 import (
-	"io"
+	"bufio"
 	"log"
 	"net/http"
-	"strings"
 
-	"github.com/roman-mazur/architecture-lab-3/painter"
+	"github.com/roman-mazur/architecture-lab-3/painter" // Adjust import path
 )
 
-// HttpHandler конструює обробник HTTP запитів, який дані з запиту віддає у Parser, а потім відправляє отриманий список
-// операцій у painter.Loop.
-func HttpHandler(loop *painter.Loop, p *Parser) http.Handler {
-	return http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
-		var in io.Reader = r.Body
-		if r.Method == http.MethodGet {
-			in = strings.NewReader(r.URL.Query().Get("cmd"))
-		}
-
-		cmds, err := p.Parse(in)
-		if err != nil {
-			log.Printf("Bad script: %s", err)
-			rw.WriteHeader(http.StatusBadRequest)
+// HttpHandler creates an HTTP handler that parses commands and posts them to the loop.
+func HttpHandler(loop *painter.Loop) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			log.Printf("HTTP Handler: Method not allowed %s", r.Method)
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
 
-		loop.Post(painter.OperationList(cmds))
-		rw.WriteHeader(http.StatusOK)
-	})
+		scanner := bufio.NewScanner(r.Body)
+		defer r.Body.Close()
+
+		var ops []painter.Operation // Collect operations from the request
+
+		for scanner.Scan() {
+			commandLine := scanner.Text()
+			log.Printf("HTTP Handler: Received command: %s", commandLine) // Log received command
+
+			op, err := Parse(commandLine)
+			if err != nil {
+				log.Printf("HTTP Handler: Error parsing command '%s': %v", commandLine, err)
+				// Decide whether to stop processing or just skip the bad line
+				// http.Error(w, "Error parsing command: "+err.Error(), http.StatusBadRequest)
+				// return
+				continue // Skip this line and process others
+			}
+			if op != nil {
+				ops = append(ops, op)
+			}
+		}
+
+		if err := scanner.Err(); err != nil {
+			log.Printf("HTTP Handler: Error reading request body: %v", err)
+			http.Error(w, "Error reading request body", http.StatusInternalServerError)
+			return
+		}
+
+		// Post all parsed operations to the loop
+		// Note: Posting as a single list might be better with OperationList
+		// loop.Post(painter.OperationList(ops)) // If OperationList is implemented
+		// Or post one by one:
+		for _, op := range ops {
+			loop.Post(op)
+		}
+
+		log.Printf("HTTP Handler: Successfully processed %d operations", len(ops))
+		w.WriteHeader(http.StatusOK) // Send OK response
+		w.Write([]byte("Commands processed\n"))
+
+	}
 }
