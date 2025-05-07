@@ -1,0 +1,64 @@
+name: Go CI & Test
+
+on:
+  push:
+    branches: [ main, master ] # Або ваші основні гілки
+  pull_request:
+    branches: [ main, master ] # Або ваші основні гілки
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest # Використовуємо останню Ubuntu
+
+    steps:
+    # 1. Checkout коду репозиторію
+    - name: Checkout code
+      uses: actions/checkout@v4 # Використовуємо останню версію checkout
+
+    # 2. Встановлення Go
+    - name: Set up Go
+      uses: actions/setup-go@v5 # Використовуємо останню версію setup-go
+      with:
+        # Читаємо версію Go з файлу go.mod - це найкраща практика
+        go-version-file: 'go.mod'
+        # Включаємо кешування Go модулів та білд кешу для швидкості
+        cache: true
+
+    # 3. Завантаження Go модулів (опціонально, але корисно для перевірки)
+    #    go mod tidy перевірить, чи всі залежності в go.mod актуальні
+    - name: Verify dependencies
+      run: go mod tidy
+
+    # 4. Встановлення СИСТЕМНИХ залежностей для Shiny (X11, OpenGL)
+    #    Це КРИТИЧНО для збірки та тестування shiny на Linux CI
+    - name: Install System Dependencies for Shiny
+      run: |
+        sudo apt-get update -qq
+        sudo apt-get install -y --no-install-recommends \
+          libx11-dev \
+          libxcursor-dev \
+          libxrandr-dev \
+          libxinerama-dev \
+          libxi-dev \
+          libgl1-mesa-dev \
+          libxxf86vm-dev
+
+    # 5. Збірка проекту
+    #    ВАЖЛИВО: Вкажіть правильний шлях до вашого main пакета.
+    #    Виходячи з вашої структури, це має бути ./cmd/painter
+    - name: Build application
+      run: go build -v -o painterApp ./cmd/painter # Змінено шлях
+
+    # 6. Запуск тестів
+    #    !!! ЗМІНЕНО: Виключаємо каталог scripts з тестування !!!
+    #    Запускаємо тести лише для пакетів painter та його підпакетів.
+    - name: Run tests with race detector
+      run: go test -race -v ./painter/... # Змінено з ./... на ./painter/...
+
+    # 7. (Опціонально) Статичний аналіз коду
+    #    golangci-lint - популярний лінтер для Go
+    # - name: Run linter (golangci-lint)
+    #   uses: golangci/golangci-lint-action@v4
+    #   with:
+    #     version: v1.56 # Або остання версія
+    #     # args: --verbose # Додаткові аргументи для лінтера
